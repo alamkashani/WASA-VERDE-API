@@ -1,3 +1,5 @@
+
+from schemas import SimulationRequest
 from fastapi import FastAPI
 
 app = FastAPI(
@@ -6,7 +8,12 @@ app = FastAPI(
 )
 
 
-@app.get("/")
+@app.post("/simulate")
+def simulate(
+    request: SimulationRequest
+):
+
+    return request
 def root():
     return {
         "status": "online",
