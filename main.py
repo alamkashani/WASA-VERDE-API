@@ -13,7 +13,17 @@ def simulate(
     request: SimulationRequest
 ):
 
-    return request
+    print("Received from Bolt:")
+    print(request)
+
+    return {
+        "indoorTemp": 24.3,
+        "indoorHumidity": 71,
+        "waterRecycled": 1460,
+        "waterSavings": 82.5,
+        "coolingEnergy": 23.4,
+        "electricityConsumption": 7.8,
+    }
 def root():
     return {
         "status": "online",
