@@ -7,6 +7,383 @@ from .states import (
     EvaporationState,
 )
 
+def saturation_vapor_pressure(
+    temperature: float,
+) -> float:
+    """
+    Calculate saturation vapor pressure of water.
+
+    Parameters
+    ----------
+    temperature : float
+        Air temperature (°C).
+
+    Returns
+    -------
+    float
+        Saturation vapor pressure (Pa).
+    """
+
+    import math
+
+    return (
+        610.78
+        * math.exp(
+            (17.2694 * temperature)
+            / (temperature + 237.3)
+        )
+    )
+
+
+def vapor_pressure_deficit(
+    temperature: float,
+    relative_humidity: float,
+) -> float:
+    """
+    Calculate air vapor pressure deficit (VPD).
+
+    Parameters
+    ----------
+    temperature : float
+        Indoor air temperature (°C).
+
+    relative_humidity : float
+        Indoor relative humidity (0.0-1.0).
+
+    Returns
+    -------
+    float
+        Vapor pressure deficit (Pa).
+    """
+
+    if not (0.0 <= relative_humidity <= 1.0):
+        raise ValueError(
+            "Relative humidity must be between 0 and 1."
+        )
+
+    saturation_pressure = saturation_vapor_pressure(
+        temperature
+    )
+
+    actual_vapor_pressure = (
+        relative_humidity
+        * saturation_pressure
+    )
+
+    return max(
+        0.0,
+        saturation_pressure
+        - actual_vapor_pressure,
+    )
+
+def tomato_leaf_area_index(
+    crop_age_days: float,
+) -> float:
+    """
+    Estimate tomato leaf area index (LAI)
+    from crop age.
+
+    Parameters
+    ----------
+    crop_age_days : float
+        Days since planting.
+
+    Returns
+    -------
+    float
+        Estimated leaf area index (m² leaf / m² ground).
+
+    Notes
+    -----
+    This is a simplified V0.1 crop-development
+    representation for greenhouse tomato.
+
+    It is intended to provide a changing canopy
+    state for the transpiration model rather than
+    assuming a fully developed crop from day 1.
+    """
+
+    if crop_age_days < 0.0:
+        raise ValueError(
+            "Crop age cannot be negative."
+        )
+
+    # Establishment: day 0 to day 20
+    if crop_age_days <= 20.0:
+        return (
+            0.2
+            + (1.0 - 0.2)
+            * crop_age_days
+            / 20.0
+        )
+
+    # Rapid canopy development: day 20 to day 50
+    if crop_age_days <= 50.0:
+        return (
+            1.0
+            + (3.0 - 1.0)
+            * (crop_age_days - 20.0)
+            / 30.0
+        )
+
+    # Mature canopy
+    return 3.0
+
+def absorbed_crop_radiation(
+    solar_radiation: float,
+    leaf_area_index: float,
+    extinction_coefficient: float = 0.48,
+) -> float:
+    """
+    Estimate solar radiation intercepted by the crop canopy.
+
+    Parameters
+    ----------
+    solar_radiation : float
+        Solar radiation reaching the crop (W/m²).
+
+    leaf_area_index : float
+        Crop leaf area index (m² leaf / m² ground).
+
+    extinction_coefficient : float
+        Canopy short-wave extinction coefficient.
+
+    Returns
+    -------
+    float
+        Solar radiation intercepted by the canopy (W/m²).
+    """
+
+    import math
+
+    if solar_radiation < 0.0:
+        raise ValueError(
+            "Solar radiation cannot be negative."
+        )
+
+    if leaf_area_index < 0.0:
+        raise ValueError(
+            "Leaf area index cannot be negative."
+        )
+
+    if extinction_coefficient < 0.0:
+        raise ValueError(
+            "Extinction coefficient cannot be negative."
+        )
+
+    intercepted_fraction = (
+        1.0
+        - math.exp(
+            -extinction_coefficient
+            * leaf_area_index
+        )
+    )
+
+    return (
+        solar_radiation
+        * intercepted_fraction
+    )
+
+
+
+def tomato_transpiration_rate(
+    temperature: float,
+    relative_humidity: float,
+    solar_radiation: float,
+    leaf_area_index: float,
+    boundary_layer_resistance: float = 100.0,
+) -> float:
+    """
+    Estimate greenhouse tomato transpiration rate.
+
+    Parameters
+    ----------
+    temperature : float
+        Indoor air temperature (°C).
+
+    relative_humidity : float
+        Indoor relative humidity (0.0-1.0).
+
+    solar_radiation : float
+        Solar radiation reaching the crop environment
+        (W/m²).
+
+    leaf_area_index : float
+        Tomato leaf area index (m² leaf / m² ground).
+
+    boundary_layer_resistance : float
+        Leaf boundary-layer resistance (s/m).
+
+    Returns
+    -------
+    float
+        Crop transpiration rate
+        (kg water / m² ground / s).
+
+    Notes
+    -----
+    Simplified Stanghellini-type greenhouse
+    tomato transpiration formulation.
+
+    The model combines:
+    - crop net radiation,
+    - indoor humidity deficit,
+    - LAI,
+    - boundary-layer resistance,
+    - tomato stomatal resistance.
+    """
+
+    import math
+
+    if not (0.0 <= relative_humidity <= 1.0):
+        raise ValueError(
+            "Relative humidity must be between 0 and 1."
+        )
+
+    if solar_radiation < 0.0:
+        raise ValueError(
+            "Solar radiation cannot be negative."
+        )
+
+    if leaf_area_index < 0.0:
+        raise ValueError(
+            "Leaf area index cannot be negative."
+        )
+
+    if boundary_layer_resistance <= 0.0:
+        raise ValueError(
+            "Boundary layer resistance must be positive."
+        )
+
+    if leaf_area_index == 0.0:
+        return 0.0
+
+    # ----------------------------------------------
+    # Crop net radiation
+    # ----------------------------------------------
+
+    net_radiation = (
+        0.86
+        * (
+            1.0
+            - math.exp(
+                -0.7 * leaf_area_index
+            )
+        )
+        * solar_radiation
+    )
+
+    # ----------------------------------------------
+    # Ratio of latent to sensible heat response
+    # ----------------------------------------------
+
+    epsilon = (
+        0.7584
+        * math.exp(
+            0.0518 * temperature
+        )
+    )
+
+    # ----------------------------------------------
+    # Tomato stomatal resistance
+    # ----------------------------------------------
+
+    radiation_per_leaf_area = (
+        net_radiation
+        / (2.0 * leaf_area_index)
+    )
+
+    stomatal_resistance = (
+        82.0
+        * (
+            radiation_per_leaf_area + 4.30
+        )
+        / (
+            radiation_per_leaf_area + 0.54
+        )
+        * (
+            1.0
+            + 0.023
+            * (temperature - 24.5) ** 2
+        )
+    )
+
+    # ----------------------------------------------
+    # Saturated water-vapour concentration
+    # ----------------------------------------------
+
+    saturation_pressure = saturation_vapor_pressure(
+        temperature
+    )
+
+    water_vapor_gas_constant = 461.5
+
+    saturation_concentration = (
+        saturation_pressure
+        / (
+            water_vapor_gas_constant
+            * (temperature + 273.15)
+        )
+        * 1000.0
+    )
+
+    actual_concentration = (
+        relative_humidity
+        * saturation_concentration
+    )
+
+    vapor_concentration_deficit = (
+        saturation_concentration
+        - actual_concentration
+    )
+
+    # ----------------------------------------------
+    # Latent heat
+    # ----------------------------------------------
+
+    latent_heat_j_per_g = (
+        latent_heat(temperature)
+        / 1000.0
+    )
+
+    # ----------------------------------------------
+    # Stanghellini transpiration
+    # ----------------------------------------------
+
+    numerator = (
+        2.0
+        * leaf_area_index
+    )
+
+    denominator = (
+        (1.0 + epsilon)
+        * boundary_layer_resistance
+        + stomatal_resistance
+    )
+
+    radiation_term = (
+        epsilon
+        * boundary_layer_resistance
+        / (2.0 * leaf_area_index)
+        * net_radiation
+        / latent_heat_j_per_g
+    )
+
+    transpiration_g_m2_s = (
+        numerator
+        / denominator
+        * (
+            vapor_concentration_deficit
+            + radiation_term
+        )
+    )
+
+    # g/m²/s -> kg/m²/s
+    return (
+        transpiration_g_m2_s
+        / 1000.0
+    )
+
 
 def evaporation_rate(
     surface_area: float,
@@ -247,19 +624,28 @@ def evaporation_step(
         time_step=time_step,
     )
 
-    heat_loss = latent_heat_loss(
-        evaporation_mass=mass,
-        temperature=temperature,
+    heat_loss = (
+        latent_heat_loss(
+            evaporation_mass=mass,
+            temperature=greenhouse.indoor_temperature,
+        )
+        / time_step
     )
 
+    latent_heat_power = (
+        heat_loss
+        / time_step
+    )
     return {
         "evaporation_rate": rate,
         "evaporation_mass": mass,
         "latent_heat_loss": heat_loss,
     }
+
+
 class EvaporationModel:
     """
-    Computes greenhouse evaporation.
+    Computes greenhouse crop transpiration.
     """
 
     def __init__(
@@ -272,31 +658,70 @@ class EvaporationModel:
         self.evaporation_coefficient = 1.0e-5
 
         self.cumulative_evaporation = 0.0
+
     def state(
         self,
         greenhouse: GreenhouseState,
         weather: WeatherState,
         time_step: float,
+        crop_age_days: float,
     ) -> EvaporationState:
         """
-        Compute evaporation state for one timestep.
+        Compute tomato crop transpiration for one timestep.
         """
-        rate = evaporation_rate(
-            surface_area=self.configuration.floor_area,
-            relative_humidity=weather.outdoor_relative_humidity,
-            evaporation_coefficient=self.evaporation_coefficient,
+
+        lai = tomato_leaf_area_index(
+            crop_age_days
         )
+
+        # Solar radiation available inside the greenhouse
+        inside_solar_radiation = (
+            weather.solar_radiation
+            * self.configuration.cover_transmittance
+        )
+
+        # Solar radiation absorbed by the crop canopy
+        crop_absorbed_radiation_per_area = absorbed_crop_radiation(
+            solar_radiation=inside_solar_radiation,
+            leaf_area_index=lai,
+        )
+
+        crop_absorbed_radiation = (
+            crop_absorbed_radiation_per_area
+            * self.configuration.floor_area
+        )
+
+        # Tomato transpiration
+        rate_per_area = tomato_transpiration_rate(
+            temperature=greenhouse.indoor_temperature,
+            relative_humidity=greenhouse.indoor_relative_humidity,
+            solar_radiation=inside_solar_radiation,
+            leaf_area_index=lai,
+        )
+
+        rate = (
+            rate_per_area
+            * self.configuration.floor_area
+        )
+
         mass = evaporation_mass(
             evaporation_rate=rate,
             time_step=time_step,
         )
-        heat_loss = latent_heat_loss(
-            evaporation_mass=mass,
-            temperature=greenhouse.indoor_temperature,
+
+        heat_loss = (
+            latent_heat_loss(
+                evaporation_mass=mass,
+                temperature=greenhouse.indoor_temperature,
+            )
+            / time_step
         )
+
         self.cumulative_evaporation += mass
+
         return EvaporationState(
             evaporation_rate=rate,
             latent_heat_loss=heat_loss,
             cumulative_evaporation=self.cumulative_evaporation,
+            crop_absorbed_radiation=crop_absorbed_radiation,
         )

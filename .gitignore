@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+test_5*.py
+test_6*.py
+test_net_heat.py

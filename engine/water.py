@@ -473,13 +473,25 @@ def water_savings(
 
     return min(savings, 100.0)
 
+
+
 class WaterRecoveryModel:
     """
     Computes the greenhouse water balance for one simulation timestep.
     """
 
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        recycling_efficiency: float = 0.98,
+    ) -> None:
+
+        if not (0.0 <= recycling_efficiency <= 1.0):
+            raise ValueError(
+                "Recycling efficiency must be between 0 and 1."
+            )
+
+        self.recycling_efficiency = recycling_efficiency
+        self.stored_recycled_water = 0.0
 
     def state(
         self,
@@ -488,41 +500,78 @@ class WaterRecoveryModel:
         time_step: float,
     ) -> WaterState:
         """
-        Compute one timestep water balance.
+        Compute one-timestep crop water balance.
+
+        Crop transpiration is used as the crop water requirement.
+        Actual AC condensate is the recovered water.
+        Treatment/recycling losses are applied before condensate
+        becomes reusable irrigation water.
         """
 
-        # Water evaporated from the greenhouse (kg ≈ L)
+        if time_step <= 0.0:
+            raise ValueError(
+                "Time step must be greater than zero."
+            )
+
+        # Crop water requirement during this timestep (L)
         irrigation = (
             evaporation.evaporation_rate
             * time_step
         )
 
-        # Water recovered by the air conditioner
-        recycled = (
+        # Actual condensate collected by the AC (L)
+        recovered = (
             air_conditioner.condensed_water
             * time_step
         )
 
-        balance = recycled - irrigation
+        # Condensate available for reuse after treatment losses (L)
+        recycled = (
+            recovered
+            * self.recycling_efficiency
+        )
+
+        # Fresh water still required (L)
+        available_recycled_water = (
+            self.stored_recycled_water
+            + recycled
+        )
+
+        recycled_used = min(
+            irrigation,
+            available_recycled_water,
+        )
+
+        freshwater = max(
+            0.0,
+            irrigation - recycled_used,
+        )
+
+        self.stored_recycled_water = max(
+            0.0,
+            available_recycled_water - recycled_used,
+        )
+
+        balance = self.stored_recycled_water
 
         if irrigation > 0.0:
-            savings = min(
-                recycled / irrigation * 100.0,
-                100.0,
+            savings = (
+                recycled_used
+                / irrigation
+                * 100.0
             )
         else:
             savings = 0.0
-
+            
         return WaterState(
-
             irrigation_demand=irrigation,
-
             plant_water_uptake=irrigation,
-
-            recycled_water=recycled,
-
+            recovered_water=recovered,
+            recycled_water=recycled_used,
+            stored_recycled_water=self.stored_recycled_water,
+            freshwater_required=freshwater,
             water_balance=balance,
-
             water_savings=savings,
-
         )
+    def reset(self) -> None:
+        self.stored_recycled_water = 0.0

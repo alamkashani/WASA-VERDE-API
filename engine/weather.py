@@ -48,35 +48,83 @@ class WeatherModel:
     Later versions will use measured weather data.
     """
 
-    def __init__(self, config: ClimateConfiguration):
-
+    def __init__(
+        self,
+        config: ClimateConfiguration,
+        hourly_weather: list[dict] | None = None,
+    ):
         self.config = config
-
+        self.hourly_weather = hourly_weather
     # -------------------------------------------------------------------------
 
     def temperature(self, hour: float) -> float:
         """
-        Outdoor temperature.
+        Synthetic 24-hour outdoor temperature profile.
 
-        Uses a smooth sinusoidal curve between
-        morning and afternoon temperatures.
+        Key points:
+        06:00 -> morning temperature
+        12:00 -> maximum temperature
+        18:00 -> evening temperature
+        24:00 -> morning temperature
+
+        Linear interpolation is used between these points.
         """
 
-        t_min = self.config.morning_temperature
-        t_max = self.config.maximum_temperature
+        t_morning = self.config.morning_temperature
+        t_maximum = self.config.maximum_temperature
+        t_evening = self.config.evening_temperature
 
-        sunrise = 6.0
-        sunset = 18.0
+        hour = hour % 24.0
 
-        if hour <= sunrise:
-            return t_min
+    # --------------------------------------------------
+    # Night: 00:00 -> 06:00
+    # --------------------------------------------------
 
-        if hour >= sunset:
-            return self.config.evening_temperature
+        if hour < 6.0:
 
-        angle = math.pi * (hour - sunrise) / (sunset - sunrise)
+            fraction = hour / 6.0
 
-        return t_min + (t_max - t_min) * math.sin(angle)
+            return (
+                t_morning
+                + (t_morning - t_morning) * fraction
+            )
+
+    # --------------------------------------------------
+    # Morning -> midday: 06:00 -> 12:00
+    # --------------------------------------------------
+
+        if hour < 12.0:
+
+            fraction = (hour - 6.0) / 6.0
+
+            return (
+                t_morning
+                + (t_maximum - t_morning) * fraction
+            )
+
+    # --------------------------------------------------
+    # Midday -> evening: 12:00 -> 18:00
+    # --------------------------------------------------
+
+        if hour < 18.0:
+
+            fraction = (hour - 12.0) / 6.0
+
+            return (
+                t_maximum
+                + (t_evening - t_maximum) * fraction
+            )
+
+    # --------------------------------------------------
+    # Evening -> midnight: 18:00 -> 24:00
+    # --------------------------------------------------
+
+        fraction = (hour - 18.0) / 6.0
+
+        return (
+            t_evening
+            + (t_morning - t_evening) * fraction
+        )
 
     # -------------------------------------------------------------------------
 
@@ -139,11 +187,49 @@ class WeatherModel:
         return self.config.wind_speed
 
     # -------------------------------------------------------------------------
+    def nasa_state(self, hour: float) -> WeatherState:
+        """
+        Returns weather state from normalized NASA POWER data.
 
+        NASA POWER data contains consecutive hourly records.
+        Simulation hour 0 uses record 0,
+        hour 24 uses record 24,
+        hour 48 uses record 48, etc.
+        """
+
+        if not self.hourly_weather:
+            raise ValueError(
+                "NASA hourly weather data is not available."
+            )
+
+        hour_index = int(hour)
+
+        if hour_index < 0 or hour_index >= len(self.hourly_weather):
+            raise IndexError(
+                f"Weather hour {hour_index} is outside the available "
+                f"NASA weather range of 0 to "
+                f"{len(self.hourly_weather) - 1}."
+            )
+
+        weather = self.hourly_weather[hour_index]
+
+        return WeatherState(
+            outdoor_temperature=weather["temperature"],
+            outdoor_relative_humidity=weather["relative_humidity"],
+            wind_speed=weather["wind_speed"],
+            solar_radiation=weather["solar_radiation"],
+        )
+    
     def state(self, hour: float) -> WeatherState:
         """
         Returns complete weather state.
+
+        Uses NASA POWER weather when hourly data is supplied.
+        Otherwise falls back to the synthetic weather model.
         """
+
+        if self.hourly_weather:
+            return self.nasa_state(hour)
 
         return WeatherState(
             outdoor_temperature=self.temperature(hour),
@@ -151,8 +237,6 @@ class WeatherModel:
             wind_speed=self.wind_speed(hour),
             solar_radiation=self.solar_radiation(hour),
         )
-
-
 # =============================================================================
 # End of File
 # =============================================================================

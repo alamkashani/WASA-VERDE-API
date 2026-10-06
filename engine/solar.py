@@ -51,7 +51,6 @@ class SolarModel:
     def __init__(
         self,
         greenhouse: GreenhouseConfiguration,
-        transmission: float = 0.80,
         absorptivity: float = 0.85,
     ):
         """
@@ -67,7 +66,7 @@ class SolarModel:
 
         self.greenhouse = greenhouse
 
-        self.transmission = transmission
+        self.transmission = greenhouse.cover_transmittance
 
         self.absorptivity = absorptivity
 

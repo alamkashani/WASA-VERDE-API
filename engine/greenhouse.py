@@ -336,9 +336,6 @@ def air_mass(
     return density * volume
 
 
-
-
-
 def heat_capacity(
     length: float,
     width: float,
@@ -348,46 +345,12 @@ def heat_capacity(
     pressure: float = 101325.0,
 ) -> float:
     """
-    Calculate the total heat capacity of the greenhouse air.
-
-    Parameters
-    ----------
-    length : float
-        Greenhouse length (m).
-
-    width : float
-        Greenhouse width (m).
-
-    average_height : float
-        Average greenhouse height (m).
-
-    temperature : float
-        Indoor air temperature (°C).
-
-    relative_humidity : float
-        Indoor relative humidity (0.0–1.0).
-
-    pressure : float, optional
-        Atmospheric pressure (Pa).
+    Calculate the heat capacity of greenhouse air.
 
     Returns
     -------
     float
-        Total heat capacity of the greenhouse air (J/K).
-
-    Notes
-    -----
-    Heat capacity is calculated as
-
-        C = m × cp
-
-    where
-
-        C  = heat capacity (J/K)
-
-        m  = air mass (kg)
-
-        cp = specific heat of moist air (J/kg·K)
+        Greenhouse air heat capacity (J/K).
     """
 
     mass = air_mass(
@@ -406,9 +369,6 @@ def heat_capacity(
     )
 
     return mass * cp
-
-#Energy Balance
-
 
 
 
@@ -540,9 +500,140 @@ def conductive_heat_loss(
         * (indoor_temperature - outdoor_temperature)
     )
 
-    return max(q, 0.0)
+    return q
+def soil_heat_transfer(
+    floor_area: float,
+    indoor_temperature: float,
+    soil_temperature: float,
+    heat_transfer_coefficient: float = 5.0,
+) -> float:
+    """
+    Calculate sensible heat transfer between greenhouse air and soil.
 
+    Parameters
+    ----------
+    floor_area : float
+        Greenhouse floor area (m2).
 
+    indoor_temperature : float
+        Greenhouse air temperature (C).
+
+    soil_temperature : float
+        Active soil-layer temperature (C).
+
+    heat_transfer_coefficient : float, optional
+        Effective air-soil heat transfer coefficient (W/m2/K).
+
+    Returns
+    -------
+    float
+        Heat transfer from greenhouse air to soil (W).
+
+        Positive:
+            air is warmer than soil and heat moves into soil.
+
+        Negative:
+            soil is warmer than air and heat moves into air.
+    """
+
+    if floor_area <= 0.0:
+        raise ValueError(
+            "Floor area must be greater than zero."
+        )
+
+    if heat_transfer_coefficient < 0.0:
+        raise ValueError(
+            "Heat transfer coefficient cannot be negative."
+        )
+
+    return (
+        heat_transfer_coefficient
+        * floor_area
+        * (indoor_temperature - soil_temperature)
+    )
+def update_soil_temperature(
+    current_soil_temperature: float,
+    heat_transfer_from_air: float,
+    floor_area: float,
+    soil_heat_capacity: float,
+    soil_penetration_depth: float,
+    time_step: float,
+) -> float:
+    """
+    Update the temperature of the active soil thermal layer.
+
+    Parameters
+    ----------
+    current_soil_temperature : float
+        Current soil temperature (C).
+
+    heat_transfer_from_air : float
+        Heat transferred from greenhouse air to soil (W).
+
+        Positive:
+            soil gains heat from the air.
+
+        Negative:
+            soil loses heat to the air.
+
+    floor_area : float
+        Greenhouse floor area (m2).
+
+    soil_heat_capacity : float
+        Volumetric soil heat capacity (J/m3/K).
+
+    soil_penetration_depth : float
+        Effective active soil depth (m).
+
+    time_step : float
+        Simulation time step (s).
+
+    Returns
+    -------
+    float
+        Updated soil temperature (C).
+    """
+
+    if floor_area <= 0.0:
+        raise ValueError(
+            "Floor area must be greater than zero."
+        )
+
+    if soil_heat_capacity <= 0.0:
+        raise ValueError(
+            "Soil heat capacity must be greater than zero."
+        )
+
+    if soil_penetration_depth <= 0.0:
+        raise ValueError(
+            "Soil penetration depth must be greater than zero."
+        )
+
+    if time_step <= 0.0:
+        raise ValueError(
+            "Time step must be greater than zero."
+        )
+
+    soil_volume = (
+        floor_area
+        * soil_penetration_depth
+    )
+
+    thermal_capacity = (
+        soil_volume
+        * soil_heat_capacity
+    )
+
+    temperature_change = (
+        heat_transfer_from_air
+        * time_step
+        / thermal_capacity
+    )
+
+    return (
+        current_soil_temperature
+        + temperature_change
+    )
 
 
 def ventilation_heat_loss(
@@ -607,61 +698,55 @@ def net_heat_gain(
     conductive_loss: float,
     ventilation_loss: float,
     cooling_capacity: float = 0.0,
+    soil_heat_transfer: float = 0.0,
+    crop_latent_heat: float = 0.0,
 ) -> float:
     """
-    Calculate the net heat gain of the greenhouse.
+    Calculate the net sensible heat gain of the greenhouse.
 
-    Parameters
-    ----------
-    solar_heat : float
-        Solar heat gain (W).
+    Positive values increase greenhouse air temperature.
+    Negative values decrease greenhouse air temperature.
 
-    conductive_loss : float
-        Conductive heat transfer through the greenhouse cover (W).
+    Energy balance:
 
-    ventilation_loss : float
-        Heat transfer due to ventilation (W).
-
-    cooling_capacity : float, optional
-        Heat removed by the air conditioner (W).
-        Default is 0.0.
-
-    Returns
-    -------
-    float
-        Net heat gain (W).
-
-    Notes
-    -----
-    The greenhouse energy balance is
-
-        Q_net = Q_solar
-                - Q_conduction
-                - Q_ventilation
-                - Q_cooling
-
-    Positive values indicate that the greenhouse gains heat.
-
-    Negative values indicate that the greenhouse loses heat.
+        Q_net =
+            Q_solar
+            - Q_conduction
+            - Q_ventilation
+            - Q_cooling
+            - Q_soil
+            - Q_crop_latent
     """
 
-    for value in (
-        solar_heat,
-        conductive_loss,
-        ventilation_loss,
-        cooling_capacity,
-    ):
-        if value < 0.0:
-            raise ValueError(
-                "Heat gains and losses must be non-negative."
-            )
+    if solar_heat < 0.0:
+        raise ValueError(
+            "Solar heat gain cannot be negative."
+        )
+
+    if ventilation_loss < 0.0:
+        raise ValueError(
+            "Ventilation heat loss cannot be negative."
+        )
+
+    if cooling_capacity < 0.0:
+        raise ValueError(
+            "Cooling capacity cannot be negative."
+        )
+
+    if crop_latent_heat < 0.0:
+        raise ValueError(
+            "Crop latent heat cannot be negative."
+        )
 
     return (
         solar_heat
         - conductive_loss
         - ventilation_loss
         - cooling_capacity
+        - soil_heat_transfer
+        - crop_latent_heat
     )
+
 #Temperature
 
 
@@ -689,7 +774,6 @@ def update_temperature(
 
     return current_temperature + delta_temperature
 
-
 def update_relative_humidity(
     current_relative_humidity: float,
     current_temperature: float,
@@ -697,54 +781,94 @@ def update_relative_humidity(
     evaporation_rate: float,
     condensed_water: float,
     time_step: float,
+    outdoor_temperature: float,
+    outdoor_relative_humidity: float,
+    ventilation_air_mass_flow: float,
     pressure: float = 101325.0,
 ) -> float:
     """
     Update greenhouse relative humidity using a humidity-ratio
     mass balance.
+
+    Includes:
+    - crop evaporation
+    - ventilation moisture exchange
+    - AC condensation
     """
 
     if air_mass <= 0.0:
         return current_relative_humidity
 
-    # Current humidity ratio (kg water / kg dry air)
+    # Current indoor humidity ratio
     w = humidity_ratio(
         current_temperature,
         current_relative_humidity,
         pressure,
     )
 
-    # Current water vapor in the greenhouse
+    # Current water vapor inside greenhouse
     water_vapor = w * air_mass
 
-    # Add evaporation
+    # --------------------------------------------------
+    # Add crop evaporation
+    # --------------------------------------------------
+
     water_vapor += (
         evaporation_rate
         * time_step
     )
 
-    # Remove condensation
+    # --------------------------------------------------
+    # Moisture exchange through ventilation
+    # --------------------------------------------------
+
+    outdoor_humidity_ratio = humidity_ratio(
+        outdoor_temperature,
+        outdoor_relative_humidity,
+        pressure,
+    )
+
+    ventilation_water_rate = (
+        ventilation_air_mass_flow
+        * (
+            outdoor_humidity_ratio
+            - w
+        )
+    )
+
+    water_vapor += (
+        ventilation_water_rate
+        * time_step
+    )
+
+    # --------------------------------------------------
+    # Remove water condensed by AC
+    # --------------------------------------------------
+
     water_vapor -= (
         condensed_water
         * time_step
     )
 
-    # Cannot have negative water vapor
+    # Water vapor cannot be negative
     water_vapor = max(
         0.0,
         water_vapor,
     )
 
     # New humidity ratio
-    w_new = water_vapor / air_mass
+    w_new = (
+        water_vapor
+        / air_mass
+    )
 
-    # Convert back to RH
-    
+    # Convert humidity ratio back to relative humidity
     return relative_humidity(
         current_temperature,
         w_new,
         pressure,
     )
+
 
 class GreenhouseModel:
     """
@@ -774,6 +898,7 @@ class GreenhouseModel:
         solar: SolarState,
         time_step: float,
         cooling_power: float = 0.0,
+        crop_latent_heat: float = 0.0,
     ) -> GreenhouseState:
         """
         Compute the greenhouse state for one timestep.
@@ -792,16 +917,47 @@ class GreenhouseModel:
             Current greenhouse state.
         """
         if previous_state.indoor_temperature == 0.0:
+
+    # First timestep
             current_temperature = weather.outdoor_temperature
+            current_relative_humidity = weather.outdoor_relative_humidity
+            current_soil_temperature = weather.outdoor_temperature
+
         else:
+
+    # Later timesteps
             current_temperature = previous_state.indoor_temperature
+            current_relative_humidity = previous_state.indoor_relative_humidity
+            current_soil_temperature = previous_state.soil_temperature
+    
+        soil_heat = soil_heat_transfer(
+            floor_area=self.configuration.floor_area,
+            indoor_temperature=current_temperature,
+            soil_temperature=current_soil_temperature,
+            heat_transfer_coefficient=5.0,
+        )
+        new_soil_temperature = update_soil_temperature(
+            current_soil_temperature=current_soil_temperature,
+            heat_transfer_from_air=soil_heat,
+            floor_area=self.configuration.floor_area,
+            soil_heat_capacity=self.configuration.soil_heat_capacity,
+            soil_penetration_depth=self.configuration.soil_penetration_depth,
+            time_step=time_step,
+        )
+        # Preserve the actual moisture content of the air
+        current_humidity_ratio = humidity_ratio(
+            current_temperature,
+            current_relative_humidity,
+        )
             
         capacity = heat_capacity(
-            length=self.configuration.length,
-            width=self.configuration.width,
-            average_height=self.configuration.height,
-            temperature=current_temperature,
-            relative_humidity=weather.outdoor_relative_humidity,
+            self.configuration.length,
+            self.configuration.width,
+            self.configuration.height,
+            current_temperature,
+            current_relative_humidity,
+            #soil_heat_capacity=self.configuration.soil_heat_capacity,
+            #soil_penetration_depth=self.configuration.soil_penetration_depth,
         )
 
         mass = air_mass(
@@ -809,14 +965,9 @@ class GreenhouseModel:
             width=self.configuration.width,
             average_height=self.configuration.height,
             temperature=current_temperature,
-            relative_humidity=weather.outdoor_relative_humidity,
+            relative_humidity=current_relative_humidity,
         )
-        solar_gain = solar_heat_gain(
-            solar_irradiance=solar.solar_radiation,
-            length=self.configuration.length,
-            width=self.configuration.width,
-            cover_transmittance=self.cover_transmittance,
-        )
+        solar_gain = solar.solar_heat_gain
         conductive_loss = conductive_heat_loss(
             indoor_temperature=current_temperature,
             outdoor_temperature=weather.outdoor_temperature,
@@ -829,13 +980,15 @@ class GreenhouseModel:
             air_mass_flow=self.ventilation_air_mass_flow,
             indoor_temperature=current_temperature,
             outdoor_temperature=weather.outdoor_temperature,
-            indoor_relative_humidity=weather.outdoor_relative_humidity,
+            indoor_relative_humidity=current_relative_humidity,
         )
         net_heat = net_heat_gain(
             solar_heat=solar_gain,
             conductive_loss=conductive_loss,
             ventilation_loss=ventilation_loss,
             cooling_capacity=cooling_power,
+            soil_heat_transfer=soil_heat,
+            crop_latent_heat=crop_latent_heat,
         )
         new_temperature = update_temperature(
             current_temperature=current_temperature,
@@ -843,7 +996,12 @@ class GreenhouseModel:
             heat_capacity=capacity,
             time_step=time_step,
         )
-
+        # Temperature changed, but moisture content has not yet changed.
+        # Recalculate RH at the new temperature while preserving humidity ratio.
+        new_relative_humidity = relative_humidity(
+            new_temperature,
+            current_humidity_ratio,
+        )
 #        new_relative_humidity = update_relative_humidity(
 #            current_relative_humidity=
 #            previous_state.indoor_relative_humidity,
@@ -857,7 +1015,7 @@ class GreenhouseModel:
 
             indoor_temperature=new_temperature,
 
-            indoor_relative_humidity=weather.outdoor_relative_humidity,
+            indoor_relative_humidity=new_relative_humidity,
 
             greenhouse_air_mass=mass,
 
@@ -868,5 +1026,7 @@ class GreenhouseModel:
             ventilation_heat_loss=ventilation_loss,
 
             net_heat_gain=net_heat,
+
+            soil_temperature=new_soil_temperature,
 
         )

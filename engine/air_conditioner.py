@@ -283,6 +283,7 @@ def air_conditioner_step(
     outlet_temperature: float,
     outlet_relative_humidity: float,
     cop: float,
+    maximum_cooling_capacity: float,
     pressure: float = 101325.0,
 ) -> dict:
     """
@@ -352,16 +353,55 @@ def air_conditioner_step(
         pressure,
     )
 
-    water = condensed_water(
-        air_mass_flow,
-        inlet_hr,
-        outlet_hr,
-    )
+    # --------------------------------------------------
+    # AC operating condition
+    # --------------------------------------------------
+    # If the inlet air has less enthalpy than the assumed
+    # outlet/coil condition, active cooling is not required.
+    # The AC is therefore OFF for this timestep.
 
-    power = compressor_power(
-        q,
-        cop,
-    )
+    if q <= 0.0:
+        q = 0.0
+        water = 0.0
+        power = 0.0
+
+    else:
+        # --------------------------------------------------
+        # Cooling-capacity limit
+        # --------------------------------------------------
+
+        unrestricted_q = q
+
+        q = min(
+            unrestricted_q,
+            maximum_cooling_capacity,
+        )
+
+        # Fraction of the full psychrometric air treatment
+        # that the available AC capacity can actually provide.
+        capacity_fraction = q / unrestricted_q
+
+        unrestricted_water = condensed_water(
+            air_mass_flow,
+            inlet_hr,
+            outlet_hr,
+        )
+
+        # Keep condensation consistent with the available
+        # cooling capacity.
+        water = (
+            unrestricted_water
+            * capacity_fraction
+        )
+
+        power = compressor_power(
+            q,
+            cop,
+        )
+        power = compressor_power(
+            q,
+            cop,
+        )
 
     return {
         "cooling_capacity": q,
@@ -385,6 +425,49 @@ class AirConditionerModel:
         Compute one air-conditioner timestep.
         """
 
+        # --------------------------------------------------
+        # Temperature controller
+        # --------------------------------------------------
+        # AC stays OFF while greenhouse temperature is
+        # at or below the configured temperature setpoint.
+        # --------------------------------------------------
+
+        if (
+            greenhouse.indoor_temperature
+            <= self.configuration.temperature_setpoint
+        ):
+            return AirConditionerState(
+                cooling_power=0.0,
+                electrical_power=0.0,
+                coil_temperature=self.configuration.coil_temperature,
+                outlet_temperature=greenhouse.indoor_temperature,
+                outlet_relative_humidity=greenhouse.indoor_relative_humidity,
+                condensed_water=0.0,
+            )
+
+        # --------------------------------------------------
+        # AC is ON
+        # --------------------------------------------------
+        # --------------------------------------------------
+        # Proportional cooling controller
+        # --------------------------------------------------
+        # Cooling increases gradually between the temperature
+        # setpoint and 5 C above the setpoint.
+        # --------------------------------------------------
+
+        temperature_error = (
+            greenhouse.indoor_temperature
+            - self.configuration.temperature_setpoint
+        )
+
+        proportional_band = 5.0
+
+        control_fraction = min(
+            1.0,
+            temperature_error / proportional_band,
+        )
+
+
         outlet_temperature = self.configuration.coil_temperature
 
         outlet_relative_humidity = (
@@ -398,20 +481,29 @@ class AirConditionerModel:
             outlet_temperature=outlet_temperature,
             outlet_relative_humidity=outlet_relative_humidity,
             cop=self.configuration.cop,
+            maximum_cooling_capacity=(
+                self.configuration.maximum_cooling_capacity
+            ),
+        )
+        controlled_cooling_power = (
+            results["cooling_capacity"]
+            * control_fraction
         )
 
+        controlled_electrical_power = (
+            results["compressor_power"]
+            * control_fraction
+        )
 
+        controlled_condensed_water = (
+            results["condensed_water"]
+            * control_fraction
+        )
         return AirConditionerState(
-
-            cooling_power=results["cooling_capacity"],
-
-            electrical_power=results["compressor_power"],
-
+            cooling_power=controlled_cooling_power,
+            electrical_power=controlled_electrical_power,
             coil_temperature=self.configuration.coil_temperature,
-
             outlet_temperature=outlet_temperature,
-
             outlet_relative_humidity=outlet_relative_humidity,
-
-            condensed_water=results["condensed_water"],
+            condensed_water=controlled_condensed_water,
         )

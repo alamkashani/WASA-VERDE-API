@@ -138,7 +138,14 @@ class AirConditionerConfiguration(BaseModel):
         ge=0.0,
         le=1.0,
     )
-
+    maximum_cooling_capacity: float = Field(
+        125000.0,
+        gt=0.0,
+    )
+    temperature_setpoint: float = Field(
+        30.0,
+        gt=0.0,
+    )
 # =============================================================================
 # Simulation Configuration
 # =============================================================================
@@ -148,18 +155,27 @@ class SimulationConfiguration(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
+    store_interval_seconds: float = Field(
+        0.0,
+        ge=0.0,
+    )
     start_hour: float = Field(
-        6.25,
+        0.0,
         ge=0,
         le=24
     )
 
     end_hour: float = Field(
-        19.50,
+        24.0,
         ge=0,
         le=24
     )
-
+    
+    simulation_days: int = Field(
+        1,
+        ge=1,
+    )
+    
     time_step: float = Field(
         DEFAULT_TIME_STEP,
         gt=0
@@ -176,12 +192,20 @@ class SimulationConfiguration(BaseModel):
     air_conditioner: AirConditionerConfiguration = Field(
         default_factory=AirConditionerConfiguration
     )
+
+    cooling_enabled: bool = True
+    
     @property
     def simulation_duration(self) -> float:
         """
-        Total simulation duration in seconds.
+         Total simulation duration in seconds.
         """
-        return (self.end_hour - self.start_hour) * 3600.0
+
+        daily_duration = (
+            self.end_hour - self.start_hour
+        ) * 3600.0
+
+        return daily_duration * self.simulation_days
 
 # =============================================================================
 # End of File

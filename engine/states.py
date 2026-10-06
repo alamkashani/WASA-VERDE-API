@@ -71,19 +71,23 @@ class GreenhouseState(BaseModel):
 
     indoor_relative_humidity: float = 0.0
 
+    soil_temperature: float = 0.0
+
 
 # =============================================================================
 # Evaporation State
 # =============================================================================
 
 class EvaporationState(BaseModel):
-    """Water evaporation inside the greenhouse."""
+    """Crop transpiration and canopy energy state."""
 
     model_config = ConfigDict(validate_assignment=True)
 
     evaporation_rate: float = 0.0          # kg/s
 
     latent_heat_loss: float = 0.0          # W
+
+    crop_absorbed_radiation: float = 0.0   # W
 
     cumulative_evaporation: float = 0.0    # kg
 
@@ -113,21 +117,22 @@ class AirConditionerState(BaseModel):
 # =============================================================================
 
 class WaterState(BaseModel):
-    """Water balance."""
+    """Water balance for one simulation timestep."""
 
     model_config = ConfigDict(validate_assignment=True)
 
-    irrigation_demand: float = 0.0           # L
+    irrigation_demand: float = 0.0       # L
+    plant_water_uptake: float = 0.0      # L
 
-    plant_water_uptake: float = 0.0          # L
+    recovered_water: float = 0.0         # L
+    recycled_water: float = 0.0          # L
+    freshwater_required: float = 0.0     # L
 
-    recycled_water: float = 0.0              # L
+    water_balance: float = 0.0           # L
+    water_savings: float = 0.0           # %
 
-    water_balance: float = 0.0               # L
-
-    water_savings: float = 0.0               # %
-
-
+    stored_recycled_water: float = 0.0   # L
+    
 # =============================================================================
 # End of File
 # =============================================================================

@@ -125,7 +125,7 @@ DEFAULT_COP: float = 3.5
 DEFAULT_COIL_TEMPERATURE: float = 10.0
 # °C
 
-DEFAULT_AIRFLOW: float = 0.0
+DEFAULT_AIRFLOW: float = 5.0
 # kg/s
 
 
