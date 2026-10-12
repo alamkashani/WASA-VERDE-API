@@ -55,12 +55,17 @@ def build_current_farm_scenario(
         customer.existing_cooling
     )
 
-    if customer.existing_cooling:
-
+    if (
+        customer.existing_cooling
+        and customer.existing_cooling_capacity_kw > 0.0
+    ):
         configuration.air_conditioner.maximum_cooling_capacity = (
             customer.existing_cooling_capacity_kw
             * 1000.0
         )
+    # If active cooling is reported but its capacity is unknown (0 kW),
+    # retain the positive area-scaled reference capacity already present
+    # in base_configuration. Never assign zero into AirConditionerConfiguration.
 
     # -------------------------------------------------------------------------
     # Return exact current-farm configuration
@@ -103,11 +108,16 @@ def build_shading_scenario(
         customer.existing_cooling
     )
 
-    if customer.existing_cooling:
+    if (
+        customer.existing_cooling
+        and customer.existing_cooling_capacity_kw > 0.0
+    ):
         configuration.air_conditioner.maximum_cooling_capacity = (
             customer.existing_cooling_capacity_kw
             * 1000.0
         )
+    # Unknown current cooling capacity keeps the safe positive reference
+    # capacity from base_configuration.
 
     return configuration
 
@@ -185,70 +195,6 @@ def run_current_farm(
         configuration=configuration,
         hourly_weather=hourly_weather,
     )
-
-def summarize_scenario(
-    results,
-    time_step: float,
-) -> dict:
-    """
-    Convert one SimulationResults object into the
-    customer-facing Digital Twin metrics.
-
-    No new physics is calculated here.
-    """
-
-    # -------------------------------------------------------------------------
-    # Heat exposure
-    #
-    # SimulationResults already aggregates temperature at full resolution,
-    # but threshold exposure is calculated from stored states.
-    # -------------------------------------------------------------------------
-
-    hours_above_32c = sum(
-        time_step / 3600.0
-        for state in results.states
-        if state.indoor_temperature > 32.0
-    )
-
-    hours_above_35c = sum(
-        time_step / 3600.0
-        for state in results.states
-        if state.indoor_temperature > 35.0
-    )
-
-    # -------------------------------------------------------------------------
-    # Main assessment metrics
-    # -------------------------------------------------------------------------
-
-    return {
-        "average_temperature_c":
-            results.average_indoor_temperature,
-
-        "maximum_temperature_c":
-            results.maximum_indoor_temperature,
-
-        "hours_above_32c":
-            hours_above_32c,
-
-        "hours_above_35c":
-            hours_above_35c,
-
-        "crop_water_requirement_m3":
-            results.total_irrigation_demand / 1000.0,
-
-        "recovered_water_m3":
-            results.total_water_recovered / 1000.0,
-
-        "recycled_water_m3":
-            results.total_recycled_water / 1000.0,
-
-        "freshwater_requirement_m3":
-            results.total_freshwater_required / 1000.0,
-
-        "electricity_kwh":
-            results.total_electrical_energy / 3_600_000.0,
-    }
-
 
 def summarize_scenario(
     results,
@@ -626,4 +572,5 @@ def run_customer_assessment(
         "scenarios": scenarios,
         "recommendation": recommendation,
         "economics": economics,
+        "assumptions": list(customer.assumptions),
     }
